@@ -69,7 +69,7 @@ public class VirtualBeacon: NSObject, CBPeripheralManagerDelegate {
     ///     - minor: The least significant value of the beacon.
     ///
     /// - SeeAlso: CoreLocation.CLBeacon
-    public func startAdvertising(uuid: NSUUID, major: CLBeaconMajorValue, minor: CLBeaconMinorValue) {
+    public func startAdvertising(uuid uuid: NSUUID, major: CLBeaconMajorValue, minor: CLBeaconMinorValue) {
         let isBluetoothEnabled = peripheralManager.state == .PoweredOn
         if isBluetoothEnabled {
             region = CLBeaconRegion(proximityUUID: uuid, major: major, minor: minor, identifier: VirtualBeacon.regionIdentifier)
