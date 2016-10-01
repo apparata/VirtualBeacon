@@ -1,9 +1,7 @@
 //
-// Copyright © 2015 Apparata AB. All rights reserved.
-//
 // MIT License
 //
-// Copyright (C) 2015 by Apparata AB
+// Copyright (C) 2016 by Apparata AB
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -30,11 +28,47 @@ import CoreBluetooth
 
 /// Delegate of the VirtualBeacon class.
 public protocol VirtualBeaconDelegate : class {
-    func virtualBeaconDidStartAdvertising(virtualBeacon: VirtualBeacon)
-    func virtualBeaconDidFailToStartAdvertising(virtualBeacon: VirtualBeacon, error: NSError)
-    func virtualBeaconDidFailToStartAdvertisingDueToBluetoothNotEnabled(virtualBeacon: VirtualBeacon)
-    func virtualBeaconDidStopAdvertising(virtualBeacon: VirtualBeacon)
+    func virtualBeaconBluetoothPoweredOn(_ virtualVeacon: VirtualBeacon)
+    func virtualBeaconDidStartAdvertising(_ virtualBeacon: VirtualBeacon)
+    func virtualBeaconDidFailToStartAdvertising(_ virtualBeacon: VirtualBeacon, error: NSError)
+    func virtualBeaconDidFailToStartAdvertisingDueToBluetoothNotEnabled(_ virtualBeacon: VirtualBeacon)
+    func virtualBeaconDidStopAdvertising(_ virtualBeacon: VirtualBeacon)
 }
+
+#if os(tvOS)
+    private struct BeaconRegion {
+        let proximityUUID: NSUUID
+        let major: UInt16
+        let minor: UInt16
+        let identifier: String
+        
+        init(proximityUUID: NSUUID, major: UInt16, minor: UInt16, identifier: String) {
+            self.proximityUUID = proximityUUID
+            self.major = major
+            self.minor = minor
+            self.identifier = identifier
+        }
+        
+        func peripheralData(withMeasuredPower power: Int8?) -> [String: AnyObject] {
+            let iBeaconKey = "kCBAdvDataAppleBeaconKey"
+            
+            let data = NSMutableData(capacity: 21)!
+            var uuidBytes = [UInt8](repeating: 0, count: 16)
+            proximityUUID.getBytes(&uuidBytes)
+            data.append(uuidBytes, length: 16)
+            var majorValue = CFSwapInt16(major)
+            data.append(&majorValue, length: 2)
+            var minorValue = CFSwapInt16(minor)
+            data.append(&minorValue, length: 2)
+            var powerValue: Int8 = power ?? -59
+            data.append(&powerValue, length: 1)
+            
+            return [iBeaconKey: data]
+        }
+    }
+#else
+    typealias BeaconRegion = CLBeaconRegion
+#endif
 
 /// VirtualBeacon allows a iOS device to act as an iBeacon.
 public class VirtualBeacon: NSObject, CBPeripheralManagerDelegate {
@@ -48,19 +82,24 @@ public class VirtualBeacon: NSObject, CBPeripheralManagerDelegate {
     
     private var peripheralManager: CBPeripheralManager!
     
-    private var region: CLBeaconRegion!
+    private var region: BeaconRegion!
     
-    private static let regionIdentifier = NSUUID().UUIDString
+    private static let regionIdentifier = UUID().uuidString
     
     public override init() {
         super.init()
-        peripheralManager = CBPeripheralManager(delegate: self, queue: dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_DEFAULT, 0))
+        peripheralManager = CBPeripheralManager()
+        peripheralManager.delegate = self
+    }
+    
+    deinit {
+        stopAdvertising()
     }
     
     /// Start advertising the beacon.
     ///
     /// NOTE: CoreBluetooth only allows virtual beacons while the app is in
-    ///       the foreground, so VirtualBeacon set idleTimerDisabled to true
+    ///       the foreground, so VirtualBeacon sets idleTimerDisabled to true
     ///       while it is advertising.
     ///
     /// - Parameters:
@@ -69,14 +108,18 @@ public class VirtualBeacon: NSObject, CBPeripheralManagerDelegate {
     ///     - minor: The least significant value of the beacon.
     ///
     /// - SeeAlso: CoreLocation.CLBeacon
-    public func startAdvertising(uuid uuid: NSUUID, major: CLBeaconMajorValue, minor: CLBeaconMinorValue) {
-        let isBluetoothEnabled = peripheralManager.state == .PoweredOn
+    public func startAdvertising(uuid: UUID, major: CLBeaconMajorValue, minor: CLBeaconMinorValue) {
+        let isBluetoothEnabled = peripheralManager.state == .poweredOn
         if isBluetoothEnabled {
-            region = CLBeaconRegion(proximityUUID: uuid, major: major, minor: minor, identifier: VirtualBeacon.regionIdentifier)
+#if os(tvOS)
+    region = BeaconRegion(proximityUUID: uuid as NSUUID, major: major, minor: minor, identifier: VirtualBeacon.regionIdentifier)
+#else
+    region = BeaconRegion(proximityUUID: uuid, major: major, minor: minor, identifier: VirtualBeacon.regionIdentifier)
+#endif
             if isAdvertising {
                 peripheralManager.stopAdvertising()
             }
-            startAdvertisingRegion(region)
+            startAdvertisingRegion(region: region)
         } else {
             delegate?.virtualBeaconDidFailToStartAdvertisingDueToBluetoothNotEnabled(self)
         }
@@ -84,33 +127,33 @@ public class VirtualBeacon: NSObject, CBPeripheralManagerDelegate {
     
     /// Stop advertising the beacon.
     public func stopAdvertising() {
-        UIApplication.sharedApplication().idleTimerDisabled = false
+        UIApplication.shared.isIdleTimerDisabled = false
         if isAdvertising {
             peripheralManager.stopAdvertising()
             delegate?.virtualBeaconDidStopAdvertising(self)
         }
     }
     
-    private func startAdvertisingRegion(region: CLBeaconRegion) {
-        let advertisingData = NSDictionary(dictionary: region.peripheralDataWithMeasuredPower(nil)) as! [String : AnyObject]
+    private func startAdvertisingRegion(region: BeaconRegion) {
+        let advertisingData = NSDictionary(dictionary: region.peripheralData(withMeasuredPower: nil)) as! [String : AnyObject]
         peripheralManager.startAdvertising(advertisingData)
-        UIApplication.sharedApplication().idleTimerDisabled = true
+        UIApplication.shared.isIdleTimerDisabled = true
     }
     
     // MARK: - Peripheral Manager Delegate
     
-    public func peripheralManagerDidUpdateState(peripheralManager: CBPeripheralManager) {
-        let isBluetoothEnabled = peripheralManager.state == .PoweredOn
+    public func peripheralManagerDidUpdateState(_ peripheralManager: CBPeripheralManager) {
+        let isBluetoothEnabled = peripheralManager.state == .poweredOn
         if !isBluetoothEnabled {
             stopAdvertising()
         }
     }
     
-    public func peripheralManagerDidStartAdvertising(peripheral: CBPeripheralManager, error: NSError?) {
+    public func peripheralManagerDidStartAdvertising(_ peripheral: CBPeripheralManager, error: Error?) {
         if error == nil {
             delegate?.virtualBeaconDidStartAdvertising(self)
         } else {
-            delegate?.virtualBeaconDidFailToStartAdvertising(self, error: error!)
+            delegate?.virtualBeaconDidFailToStartAdvertising(self, error: error! as NSError)
         }
     }
 }
