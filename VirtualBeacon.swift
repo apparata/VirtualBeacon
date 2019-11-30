@@ -70,7 +70,7 @@ public protocol VirtualBeaconDelegate : class {
     typealias BeaconRegion = CLBeaconRegion
 #endif
 
-/// VirtualBeacon allows a iOS device to act as an iBeacon.
+/// VirtualBeacon allows an iOS/tvOS device to act as an iBeacon.
 public class VirtualBeacon: NSObject, CBPeripheralManagerDelegate {
     
     public weak var delegate: VirtualBeaconDelegate?
